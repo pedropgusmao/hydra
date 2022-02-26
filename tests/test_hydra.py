@@ -525,6 +525,34 @@ def test_cfg_resolve_interpolation(
 
 
 @mark.parametrize(
+    "script,expected",
+    [
+        param(
+            "tests/test_apps/passes_callable_class_to_hydra_main/my_app.py",
+            dedent(
+                """\
+                123
+                my_app
+                """
+            ),
+            id="passes_callable_class_to_hydra_main",
+        ),
+    ],
+)
+def test_pass_callable_class_to_hydra_main(
+    tmpdir: Path, script: str, expected: str
+) -> None:
+    cmd = [
+        script,
+        "hydra.run.dir=" + str(tmpdir),
+        "hydra.job.chdir=True",
+    ]
+
+    result, _err = run_python_script(cmd)
+    assert_text_same(result, expected)
+
+
+@mark.parametrize(
     "other_flag",
     [None, "--run", "--multirun", "--info", "--shell-completion", "--hydra-help"],
 )
@@ -1031,14 +1059,14 @@ def test_hydra_output_dir(
     "directory,file,module, error",
     [
         (
-            "tests/test_apps/run_as_module/1",
+            "tests/test_apps/run_as_module_1",
             "my_app.py",
             "my_app",
             "Primary config module is empty",
         ),
-        ("tests/test_apps/run_as_module/2", "my_app.py", "my_app", None),
-        ("tests/test_apps/run_as_module/3", "module/my_app.py", "module.my_app", None),
-        ("tests/test_apps/run_as_module/4", "module/my_app.py", "module.my_app", None),
+        ("tests/test_apps/run_as_module_2", "my_app.py", "my_app", None),
+        ("tests/test_apps/run_as_module_3", "module/my_app.py", "module.my_app", None),
+        ("tests/test_apps/run_as_module_4", "module/my_app.py", "module.my_app", None),
     ],
 )
 def test_module_run(
@@ -1285,7 +1313,7 @@ def test_config_dir_argument(
 
 
 def test_schema_overrides_hydra(monkeypatch: Any, tmpdir: Path) -> None:
-    monkeypatch.chdir("tests/test_apps/schema-overrides-hydra")
+    monkeypatch.chdir("tests/test_apps/schema_overrides_hydra")
     cmd = [
         "my_app.py",
         "hydra.run.dir=" + str(tmpdir),
@@ -1442,7 +1470,7 @@ def test_job_chdir_not_specified(tmpdir: Path) -> None:
 
     expected = dedent(
         """
-        .*UserWarning: Hydra 1.3 will no longer change working directory at job runtime by default.
+        .*UserWarning: Future Hydra versions will no longer change working directory at job runtime by default.
         See https://hydra.cc/docs/upgrades/1.1_to_1.2/changes_to_job_working_dir for more information..*
         .*
         """
@@ -1570,3 +1598,49 @@ def test_disable_chdir_with_app_chdir(tmpdir: Path, chdir: bool) -> None:
     result, _err = run_python_script(cmd)
     _path = os.getcwd() if chdir else Path(tmpdir) / "subdir"
     assert f"current dir: {_path}" in result
+
+
+@mark.parametrize(
+    "multirun",
+    [False, True],
+)
+def test_hydra_verbose_1897(tmpdir: Path, multirun: bool) -> None:
+    cmd = [
+        "tests/test_apps/hydra_verbose/my_app.py",
+        f"hydra.run.dir={tmpdir}",
+        "hydra.job.chdir=False",
+    ]
+    if multirun:
+        cmd += ["+a=1,2", "-m"]
+    run_python_script(cmd)
+
+
+@mark.parametrize(
+    "multirun",
+    [False, True],
+)
+def test_hydra_resolver_in_output_dir(tmpdir: Path, multirun: bool) -> None:
+    from hydra import __version__
+
+    subdir = "dir" + "${hydra:runtime.version}"
+
+    output_dir = str(Path(tmpdir) / subdir)
+
+    cmd = [
+        "tests/test_apps/hydra_resolver_in_output_dir/my_app.py",
+        f"hydra.run.dir='{output_dir}'",
+        f"hydra.sweep.subdir='{subdir}'",
+        f"hydra.sweep.dir={str(Path(tmpdir))}",
+        "hydra.job.chdir=False",
+    ]
+
+    if multirun:
+        cmd += ["-m"]
+
+    out, _ = run_python_script(cmd)
+
+    expected_subdir = f"dir{__version__}"
+    expected_output_dir = str(Path(tmpdir) / expected_subdir)
+    expected_log_file = Path(expected_output_dir) / "my_app.log"
+    assert expected_log_file.exists()
+    assert expected_output_dir in out
